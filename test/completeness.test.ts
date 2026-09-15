@@ -50,6 +50,28 @@ describe("tracing completeness regressions",()=>{
     const result=(plugin as any).captureProviderPayload({messages:[{role:"user",content:'API_KEY=fixture-plain-secret\nAuthorization: Basic Zml4dHVyZTpzZWNyZXQ=\npostgresql://user:fixture-db-password@localhost/db'}],token:"fixture-token-value"});
     for(const secret of ['fixture-plain-secret','Zml4dHVyZTpzZWNyZXQ=','fixture-db-password','fixture-token-value'])assert.ok(!JSON.stringify(result).includes(secret),`leaked ${secret}`);
   });
+  it("redacts secret-valued environment credentials from root and tool telemetry",async()=>withCapture(async capture=>{
+    const secret="fixture-environment-credential-89372";
+    process.env.PI_TEST_CREDENTIALS=secret;
+    const h=harness("privacy-session");
+    await h.emit("before_agent_start",{prompt:`root ${secret}`});
+    await h.emit("before_provider_request",{payload:{messages:[{role:"user",content:`provider ${secret}`}]}});
+    await h.emit("message_end",{message:{role:"assistant",content:[{type:"text",text:`assistant ${secret}`}]}});
+    await h.emit("tool_execution_start",{toolCallId:"privacy-tool",toolName:"bash",args:{command:`use ${secret}`}});
+    await h.emit("tool_execution_end",{toolCallId:"privacy-tool",toolName:"bash",result:{content:[{type:"text",text:`result ${secret}`}]}});
+    await h.emit("agent_settled");
+    await waitForRequests(capture,1);
+    const spans=capture.spans();
+    for(const name of ["Conversational Turn","LLM Call","Tool: bash"]){
+      const span=spans.find((item:any)=>item.name===name);
+      assert.ok(span,`${name} span must be exported`);
+      const telemetry=JSON.stringify({input:span.attrs["langfuse.observation.input"],output:span.attrs["langfuse.observation.output"]});
+      assert.ok(!telemetry.includes(secret),`${name} must not export the environment secret`);
+      assert.ok(telemetry.includes("[redacted-secret]"),`${name} must retain a redaction marker`);
+    }
+    assert.ok(!JSON.stringify(capture.requests).includes(secret),"secret-named environment value must not leave the process in root, generation, or tool telemetry");
+    await h.emit("session_shutdown",{reason:"quit"});
+  }));
   it("does not double-count a linked native child's usage as a second model call",async()=>withCapture(async capture=>{
     const parent=harness("usage-parent");await parent.emit("before_agent_start",{prompt:"parent"});
     await parent.emit("tool_execution_start",{toolCallId:"t1",toolName:"subagent",args:{agent:"scout"}});

@@ -40,7 +40,7 @@ export function sanitizeTelemetry(value: unknown, secrets: string[] = [], ancest
 
 export function environmentSecrets(): string[] {
   return Object.entries(process.env)
-    .filter(([key, value]) => /(?:KEY|SECRET|PASSWORD|TOKEN)$/.test(key) && (value?.length ?? 0) >= 8)
+    .filter(([key, value]) => /(?:KEY|SECRET|PASSWORD|PASSWD|TOKEN|CREDENTIALS|AUTHORIZATION|COOKIE|CONNECTION_STRING|DATABASE_URL)$/i.test(key) && (value?.length ?? 0) >= 8)
     .map(([, value]) => value!);
 }
 
